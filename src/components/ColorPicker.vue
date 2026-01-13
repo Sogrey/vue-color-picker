@@ -58,6 +58,9 @@ const isDraggingAlpha = ref(false)
 // 复制状态
 const copyTitle = ref('点击复制')
 
+// 是否正在设置颜色（用于跳过格式检查）
+const isSettingColor = ref(false)
+
 // 所有格式
 const allFormats = ['hex', 'hex8', 'rgb', 'rgba', 'hsl', 'hsv'] as const
 type FormatType = (typeof allFormats)[number]
@@ -520,6 +523,9 @@ watch(
 watch(
   formats,
   (newFormats) => {
+    // 如果正在设置颜色，跳过格式检查
+    if (isSettingColor.value) return
+
     if (newFormats.length > 0 && !newFormats.some((f) => f === currentFormat.value)) {
       // 如果当前格式不在可用格式列表中，切换到第一个可用格式
       currentFormat.value = newFormats[0] as FormatType
@@ -558,25 +564,25 @@ function updateCursorPositions() {
 
 // 从颜色字符串解析并设置颜色
 function setColorFromString(colorStr: string) {
+  let detectedFormat: FormatType | null = null
+
+  // 标记正在设置颜色，跳过格式检查
+  isSettingColor.value = true
+
   // 解析 Hex 格式
   if (colorStr.startsWith('#')) {
     let hex = colorStr.slice(1)
 
     // 处理 hex8 格式 (#RRGGBBAA)
     if (hex.length === 8) {
+      detectedFormat = 'hex8'
       const alphaValue = parseInt(hex.slice(6, 8), 16) / 255
       alpha.value = alphaValue
       hex = hex.slice(0, 6)
     }
-    // 处理缩写 hex 格式 (#RGB)
-    else if (hex.length === 3) {
-      hex = hex
-        .split('')
-        .map((c) => c + c)
-        .join('')
-    }
     // 处理缩写 hex4 格式 (#RGBA)
     else if (hex.length === 4) {
+      detectedFormat = 'hex8'
       const lastChar = hex[3]
       if (lastChar) {
         const alphaValue = parseInt(lastChar + lastChar, 16) / 255
@@ -587,6 +593,18 @@ function setColorFromString(colorStr: string) {
         .split('')
         .map((c) => c + c)
         .join('')
+    }
+    // 处理缩写 hex 格式 (#RGB)
+    else if (hex.length === 3) {
+      detectedFormat = 'hex'
+      hex = hex
+        .split('')
+        .map((c) => c + c)
+        .join('')
+    }
+    // 标准格式 (#RRGGBB)
+    else if (hex.length === 6) {
+      detectedFormat = 'hex'
     }
 
     const r = parseInt(hex.slice(0, 2), 16)
@@ -629,6 +647,12 @@ function setColorFromString(colorStr: string) {
     saturation.value = hsl.s
     lightness.value = hsl.l
 
+    // 直接设置检测到的格式，即使它不在当前 formats 列表中
+    // 这样可以保证用户输入的格式被正确显示
+    if (detectedFormat) {
+      currentFormat.value = detectedFormat
+    }
+
     // 更新游标位置
     updateCursorPositions()
   }
@@ -636,6 +660,7 @@ function setColorFromString(colorStr: string) {
   else if (colorStr.startsWith('rgb')) {
     const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/)
     if (match && match[1] && match[2] && match[3]) {
+      detectedFormat = match[4] ? 'rgba' : 'rgb'
       const r = parseInt(match[1])
       const g = parseInt(match[2])
       const b = parseInt(match[3])
@@ -643,6 +668,7 @@ function setColorFromString(colorStr: string) {
 
       alpha.value = alphaValue
 
+      // 先设置颜色值，这样 alpha.value 更新后 formats 会重新计算
       const rgbToHsl = (r: number, g: number, b: number) => {
         const r2 = r / 255
         const g2 = g / 255
@@ -679,6 +705,12 @@ function setColorFromString(colorStr: string) {
       saturation.value = hsl.s
       lightness.value = hsl.l
 
+      // 直接设置检测到的格式，即使它不在当前 formats 列表中
+      // 这样可以保证用户输入的格式被正确显示
+      if (detectedFormat) {
+        currentFormat.value = detectedFormat
+      }
+
       // 更新游标位置
       updateCursorPositions()
     }
@@ -687,6 +719,7 @@ function setColorFromString(colorStr: string) {
   else if (colorStr.startsWith('hsl')) {
     const match = colorStr.match(/hsla?\((\d+),\s*(\d+)%,\s*(\d+)%(?:,\s*([\d.]+))?\)/)
     if (match && match[1] && match[2] && match[3]) {
+      detectedFormat = 'hsl'
       const h = parseInt(match[1])
       const s = parseInt(match[2]) / 100
       const l = parseInt(match[3]) / 100
@@ -697,12 +730,19 @@ function setColorFromString(colorStr: string) {
       lightness.value = l
       alpha.value = alphaValue
 
+      // 直接设置检测到的格式，即使它不在当前 formats 列表中
+      // 这样可以保证用户输入的格式被正确显示
+      if (detectedFormat) {
+        currentFormat.value = detectedFormat
+      }
+
       // 更新游标位置
       updateCursorPositions()
     }
   }
   // 解析 hsv 格式
   else if (colorStr.startsWith('hsv')) {
+    detectedFormat = 'hsv'
     const match = colorStr.match(/hsv\((\d+),\s*(\d+)%,\s*(\d+)%\)/)
     if (match && match[1] && match[2] && match[3]) {
       const h = parseInt(match[1])
@@ -717,10 +757,19 @@ function setColorFromString(colorStr: string) {
       saturation.value = s2
       lightness.value = l
 
+      // 直接设置检测到的格式，即使它不在当前 formats 列表中
+      // 这样可以保证用户输入的格式被正确显示
+      if (detectedFormat) {
+        currentFormat.value = detectedFormat
+      }
+
       // 更新游标位置
       updateCursorPositions()
     }
   }
+
+  // 清除正在设置颜色的标志
+  isSettingColor.value = false
 }
 
 // 复制颜色值
