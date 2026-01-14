@@ -49,7 +49,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
   formats: undefined,
-  closeOnOutsideClick: false,
+  closeOnOutsideClick: true,
 })
 
 // Emits

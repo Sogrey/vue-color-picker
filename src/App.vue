@@ -73,7 +73,6 @@ function showColorPicker(event: Event) {
         >
           <ColorPicker
             v-model="customColor"
-            :close-on-outside-click="true"
             @close="showPicker = false"
             @mousedown.stop
           />

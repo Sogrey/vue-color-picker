@@ -117,7 +117,6 @@ const color = ref('#FF5733')
     <ColorPicker
       v-if="showPicker"
       v-model="color"
-      :close-on-outside-click="true"
       @close="showPicker = false"
       class="color-picker-popup"
     />
@@ -171,7 +170,6 @@ input {
     <div v-if="showPicker" class="picker-container" :style="pickerPosition">
       <ColorPicker
         v-model="color"
-        :close-on-outside-click="true"
         @close="showPicker = false"
       />
     </div>
@@ -309,7 +307,6 @@ const color = ref('#FF5733')
         <ColorPicker
           v-if="showPicker"
           v-model="formData.themeColor"
-          :close-on-outside-click="true"
           @close="showPicker = false"
           class="picker-popup"
         />
@@ -456,7 +453,7 @@ label {
 |------|------|--------|------|
 | `modelValue` | `string` | `undefined` | 当前颜色值，支持所有格式 |
 | `formats` | `FormatType[]` | `undefined` | 可选的颜色格式列表，限制显示的格式 |
-| `closeOnOutsideClick` | `boolean` | `false` | 是否在点击外部时触发 `close` 事件 |
+| `closeOnOutsideClick` | `boolean` | `true` | 是否在点击外部时触发 `close` 事件 |
 
 ### FormatType
 
