@@ -1,5 +1,5 @@
 <template>
-  <div class="color-picker-panel">
+  <div ref="panelRef" class="color-picker-panel">
     <div class="panel-row">
       <div class="spectrum-map" ref="spectrumMapRef">
         <button class="color-cursor spectrum-cursor" :style="spectrumCursorStyle"></button>
@@ -10,6 +10,7 @@
         <canvas ref="hueCanvasRef" @mousedown="startHueDrag"></canvas>
       </div>
       <div v-if="showAlphaBar" class="alpha-map">
+        <div class="alpha-checkboard"></div>
         <button class="color-cursor alpha-cursor" :style="alphaCursorStyle"></button>
         <canvas ref="alphaCanvasRef" @mousedown="startAlphaDrag"></canvas>
       </div>
@@ -19,8 +20,18 @@
         <div class="color-preview-checkboard"></div>
         <div class="color-preview-color" :style="colorPreviewStyle"></div>
       </div>
-      <div class="color-value" @click="copyColorValue" :title="copyTitle">{{ colorValue }}</div>
-      <button v-if="showFormatToggle" class="format-toggle" @click="toggleFormat">◑</button>
+      <div
+        class="color-value"
+        @click="
+          () => {
+            showFormatToggle && toggleFormat()
+            copyColorValue()
+          }
+        "
+        :title="copyTitle"
+      >
+        {{ colorValue }}
+      </div>
     </div>
   </div>
 </template>
@@ -32,16 +43,19 @@ import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 interface Props {
   modelValue?: string
   formats?: FormatType[]
+  closeOnOutsideClick?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
   formats: undefined,
+  closeOnOutsideClick: false,
 })
 
 // Emits
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  close: []
 }>()
 
 // 状态
@@ -60,6 +74,9 @@ const copyTitle = ref('点击复制')
 
 // 是否正在设置颜色（用于跳过格式检查）
 const isSettingColor = ref(false)
+
+// 用户是否手动切换过格式（用于保持用户选择的格式）
+const userHasSwitchedFormat = ref(false)
 
 // 所有格式
 const allFormats = ['hex', 'hex8', 'rgb', 'rgba', 'hsl', 'hsv'] as const
@@ -476,6 +493,8 @@ function toggleFormat() {
   const nextFormat = currentFormats[nextIndex]
   if (nextFormat) {
     currentFormat.value = nextFormat
+    // 标记用户已手动切换过格式
+    userHasSwitchedFormat.value = true
     // 触发 v-model 更新，使新格式的值同步到父组件
     const value = colorValue.value
     if (value !== undefined) {
@@ -494,14 +513,46 @@ watch([hue, saturation, lightness, alpha, currentFormat], () => {
 
 // 监听 alpha 变化，当从不透明变为透明时，自动切换到带透明度的格式
 watch(alpha, (newAlpha, oldAlpha) => {
-  // 只有当用户没有指定格式列表时，才自动切换格式
+  // 只有当用户没有指定格式列表，且用户没有手动切换过格式时，才自动切换格式
   if (!props.formats || props.formats.length === 0) {
-    if (newAlpha < 1 && oldAlpha === 1) {
-      // 从不透明变为透明，切换到第一个带透明度的格式
-      currentFormat.value = 'hex8'
-    } else if (newAlpha === 1 && oldAlpha < 1) {
-      // 从透明变为不透明，切换到第一个不带透明度的格式
-      currentFormat.value = 'hex'
+    // 如果用户已经手动切换过格式，保持用户的选择
+    if (userHasSwitchedFormat.value) return
+
+    const currentFormatSupportsAlpha = isAlphaFormat(currentFormat.value)
+
+    // 从不透明变为透明，自动切换到对应的带透明度格式
+    if (newAlpha < 1 && oldAlpha === 1 && !currentFormatSupportsAlpha) {
+      switch (currentFormat.value) {
+        case 'hex':
+          currentFormat.value = 'hex8'
+          break
+        case 'rgb':
+          currentFormat.value = 'rgba'
+          break
+        case 'hsl':
+          currentFormat.value = 'hsv' // hsl/hsla 不支持透明度，切换到 hsv
+          break
+        default:
+          currentFormat.value = 'hex8'
+          break
+      }
+    }
+    // 从透明变为不透明，自动切换到对应的不带透明度格式
+    else if (newAlpha === 1 && oldAlpha < 1 && currentFormatSupportsAlpha) {
+      switch (currentFormat.value) {
+        case 'hex8':
+          currentFormat.value = 'hex'
+          break
+        case 'rgba':
+          currentFormat.value = 'rgb'
+          break
+        case 'hsv':
+          currentFormat.value = 'hsl' // hsv 不支持不透明格式，切换到 hsl
+          break
+        default:
+          currentFormat.value = 'hex'
+          break
+      }
     }
   }
 })
@@ -525,6 +576,9 @@ watch(
   (newFormats) => {
     // 如果正在设置颜色，跳过格式检查
     if (isSettingColor.value) return
+
+    // 如果用户已经手动切换过格式，保持用户的选择
+    if (userHasSwitchedFormat.value) return
 
     if (newFormats.length > 0 && !newFormats.some((f) => f === currentFormat.value)) {
       // 如果当前格式不在可用格式列表中，切换到第一个可用格式
@@ -768,6 +822,11 @@ function setColorFromString(colorStr: string) {
     }
   }
 
+  // 如果检测到的格式与当前格式不同，说明是新的输入，重置用户切换标志
+  if (detectedFormat && detectedFormat !== currentFormat.value) {
+    userHasSwitchedFormat.value = false
+  }
+
   // 清除正在设置颜色的标志
   isSettingColor.value = false
 }
@@ -795,9 +854,34 @@ watch(hue, () => {
   drawSpectrum()
 })
 
+// 组件根元素引用
+const panelRef = ref<HTMLElement | null>(null)
+
+// 标记是否忽略下一次点击事件（用于避免刚打开时的点击事件）
+let ignoreNextClick = false
+
+// 处理点击外部
+function handleClickOutside(event: MouseEvent) {
+  if (ignoreNextClick) {
+    ignoreNextClick = false
+    return
+  }
+  if (!panelRef.value) return
+  if (!panelRef.value.contains(event.target as Node)) {
+    emit('close')
+  }
+}
+
 onMounted(() => {
   initCanvases()
   window.addEventListener('resize', initCanvases)
+
+  // 如果启用了点击外部关闭，添加点击监听
+  if (props.closeOnOutsideClick) {
+    // 忽略当前正在处理的点击事件（如果是刚打开时触发的事件）
+    ignoreNextClick = true
+    window.addEventListener('click', handleClickOutside)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -805,6 +889,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', handleSpectrumDrag)
   window.removeEventListener('mousemove', handleHueDrag)
   window.removeEventListener('mousemove', handleAlphaDrag)
+  window.removeEventListener('click', handleClickOutside)
 })
 </script>
 
@@ -816,6 +901,10 @@ onBeforeUnmount(() => {
   border: 2px solid #364347;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   padding: 10px;
+  user-select: none;
+  -ms-user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
 }
 
 .panel-row {
@@ -847,6 +936,27 @@ onBeforeUnmount(() => {
 
 .alpha-map {
   right: 0px;
+}
+
+.alpha-checkboard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image:
+    linear-gradient(45deg, #ccc 25%, transparent 25%),
+    linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%),
+    linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0px;
+  z-index: 0;
+  border-radius: 4px;
 }
 
 canvas {
@@ -963,26 +1073,5 @@ canvas {
 .color-value:hover {
   background: #1a1f24;
   border-color: #4a5960;
-}
-
-.format-toggle {
-  background: #2a3137;
-  border: 1px solid #364347;
-  border-radius: 4px;
-  color: #8b949e;
-  font-size: 18px;
-  cursor: pointer;
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  transition: background 0.2s;
-}
-
-.format-toggle:hover {
-  background: #364347;
-}
-
-.format-toggle:active {
-  background: #3d4b50;
 }
 </style>
